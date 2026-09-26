@@ -1,11 +1,17 @@
 [project]
-name = "osint-mcp"
+name = "osint-mcp-server"
 version = "0.1.0"
 description = "MCP server with passive OSINT lookups (RDAP, DNS, crt.sh, Wayback, Shodan InternetDB)"
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "robyroro" }]
 requires-python = ">=3.10"
+keywords = ["mcp", "osint", "recon", "whois", "dns", "claude"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+    "Topic :: Internet :: Name Service (DNS)",
+]
 dependencies = [
     "mcp>=2.0",
     "httpx>=0.27",
@@ -17,6 +23,11 @@ Repository = "https://github.com/robyroro/osint-mcp"
 
 [project.scripts]
 osint-mcp = "osint_mcp.server:main"
+# so `uvx osint-mcp-server` works without --from
+osint-mcp-server = "osint_mcp.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/osint_mcp"]
 
 [dependency-groups]
 dev = ["pytest>=8"]

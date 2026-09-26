@@ -1,5 +1,8 @@
 # osint-mcp
 
+[![tests](https://github.com/robyroro/osint-mcp/actions/workflows/tests.yml/badge.svg)](https://github.com/robyroro/osint-mcp/actions/workflows/tests.yml)
+[![PyPI](https://img.shields.io/pypi/v/osint-mcp-server)](https://pypi.org/project/osint-mcp-server/)
+
 MCP server that gives Claude (or any MCP client) a handful of passive recon lookups for domains and IPs. No API keys needed, everything comes from public sources.
 
 I got tired of jumping between whois, crt.sh, the Wayback Machine and Shodan tabs when looking into a domain, so this lets the model do it and put the results together.
@@ -23,7 +26,7 @@ Everything except `http_headers` is passive, the target never sees your traffic.
 Needs Python 3.10+.
 
 ```
-pip install git+https://github.com/robyroro/osint-mcp
+pip install osint-mcp-server
 ```
 
 or if you use uv you don't need to install anything, just point the client at `uvx` (see below).
@@ -37,18 +40,18 @@ Add this to `claude_desktop_config.json`:
   "mcpServers": {
     "osint": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/robyroro/osint-mcp", "osint-mcp"]
+      "args": ["osint-mcp-server"]
     }
   }
 }
 ```
 
-If you installed with pip, `"command": "osint-mcp"` with no args works too.
+If you installed with pip, `"command": "osint-mcp-server"` with no args works too.
 
 ### Claude Code
 
 ```
-claude mcp add osint -- uvx --from git+https://github.com/robyroro/osint-mcp osint-mcp
+claude mcp add osint -- uvx osint-mcp-server
 ```
 
 Cursor, Windsurf etc. take the same JSON as Claude Desktop.
@@ -90,3 +93,5 @@ This only pulls public data, but still: use it on your own stuff, bug bounty tar
 ## License
 
 MIT
+
+<!-- mcp-name: io.github.robyroro/osint-mcp -->
