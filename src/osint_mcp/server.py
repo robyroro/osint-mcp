@@ -4,7 +4,7 @@ import httpx
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
-from . import mailsec, sources
+from . import mailsec, sources, tlscert
 
 # httpx logs every request at INFO, way too chatty
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -110,6 +110,25 @@ async def email_security(domain: str, dkim_selectors: list[str] | None = None) -
     SPF, DMARC, MTA-STS, TLS-RPT and DKIM. DKIM selectors can't be listed, so a
     set of common ones is tried unless you pass your own."""
     return await _run(mailsec.check, _domain(domain), dkim_selectors)
+
+
+@mcp.tool()
+async def tls_certificate(host: str, port: int = 443) -> dict:
+    """Connect to host:port and read its TLS certificate: issuer, validity dates,
+    days until expiry, SANs, negotiated TLS version. Invalid certs (expired,
+    self-signed, wrong host) are reported with the reason."""
+    return await tlscert.fetch_certificate(_domain(host), port)
+
+
+@mcp.tool()
+async def asn_lookup(query: str, include_prefixes: bool = True) -> dict:
+    """Look up an IP or AS number (e.g. "AS13335") via RIPEstat: which AS
+    announces it, who holds the AS and every prefix it announces."""
+    try:
+        sources.parse_asn_query(query)
+    except ValueError as e:
+        raise ToolError(str(e))
+    return await _run(sources.asn_info, query, include_prefixes)
 
 
 def main():

@@ -308,3 +308,61 @@ async def internetdb(client, ip):
     if status == 404:
         return {"ip": ip, "ports": [], "note": "shodan has nothing on this ip"}
     return data
+
+
+# --- ASN / BGP (RIPEstat, free, works for every RIR not just RIPE) ---
+
+RIPESTAT = "https://stat.ripe.net/data/"
+
+
+def parse_asn_query(value):
+    """'1.1.1.1' -> ('ip', '1.1.1.1'), 'AS13335' / '13335' -> ('asn', 13335)"""
+    value = value.strip()
+    try:
+        return "ip", clean_ip(value)
+    except ValueError:
+        pass
+    num = value.upper().removeprefix("AS")
+    if not num.isdigit():
+        raise ValueError(f"expected an ip or an AS number, got {value!r}")
+    return "asn", int(num)
+
+
+async def _ripestat(client, endpoint, resource):
+    _, body = await fetch_json(
+        client, RIPESTAT + endpoint + "/data.json",
+        params={"resource": resource, "sourceapp": "osint-mcp"},
+    )
+    return (body or {}).get("data", {})
+
+
+async def asn_info(client, query, include_prefixes=True, max_prefixes=100):
+    kind, value = parse_asn_query(query)
+    out = {}
+    if kind == "ip":
+        net = await _ripestat(client, "network-info", value)
+        asns = net.get("asns", [])
+        out.update(ip=value, prefix=net.get("prefix"))
+        if not asns:
+            out["error"] = "this ip isn't announced by any AS right now"
+            return out
+        if len(asns) > 1:
+            out["all_asns"] = [int(a) for a in asns]
+        asn = int(asns[0])
+    else:
+        asn = value
+
+    overview = await _ripestat(client, "as-overview", f"AS{asn}")
+    out.update(asn=asn, holder=overview.get("holder"), announced=overview.get("announced"))
+
+    if include_prefixes:
+        announced = await _ripestat(client, "announced-prefixes", f"AS{asn}")
+        prefixes = [p["prefix"] for p in announced.get("prefixes", [])]
+        by_net = lambda p: ipaddress.ip_network(p, strict=False)
+        v4 = sorted((p for p in prefixes if ":" not in p), key=by_net)
+        v6 = sorted((p for p in prefixes if ":" in p), key=by_net)
+        out["prefix_count"] = {"ipv4": len(v4), "ipv6": len(v6)}
+        out["prefixes"] = (v4 + v6)[:max_prefixes]
+        if len(prefixes) > max_prefixes:
+            out["prefixes_truncated"] = True
+    return out
