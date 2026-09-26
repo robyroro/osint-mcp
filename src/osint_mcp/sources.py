@@ -8,7 +8,9 @@ import dns.resolver
 import dns.reversename
 import httpx
 
-USER_AGENT = "osint-mcp/0.1 (+https://github.com/robyroro/osint-mcp)"
+from .cache import get_cache
+
+USER_AGENT = "osint-mcp/0.2 (+https://github.com/robyroro/osint-mcp)"
 
 SECURITY_HEADERS = [
     "strict-transport-security",
@@ -36,6 +38,23 @@ async def get_flaky(client, url, retries=2, **kwargs):
         if r.status_code not in (502, 503, 504) or attempt == retries:
             return r
         await asyncio.sleep(2 * (attempt + 1))
+
+
+async def fetch_json(client, url, params=None, retries=0, ok=(200,), **kwargs):
+    """GET + json with the sqlite cache in front. Returns (status, data).
+    Statuses outside `ok` raise, same as raise_for_status()."""
+    cache = get_cache()
+    key = cache.key(url, params)
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
+
+    r = await get_flaky(client, url, retries=retries, params=params, **kwargs)
+    if r.status_code not in ok:
+        r.raise_for_status()
+    data = r.json() if r.content else None
+    cache.set(key, r.status_code, data)
+    return r.status_code, data
 
 
 def clean_domain(value: str) -> str:
@@ -132,21 +151,19 @@ def parse_rdap_ip(data: dict) -> dict:
 
 
 async def rdap_domain(client, domain):
-    r = await client.get(f"https://rdap.org/domain/{domain}")
-    if r.status_code == 404:
+    status, data = await fetch_json(client, f"https://rdap.org/domain/{domain}", ok=(200, 404))
+    if status == 404:
         return {
             "domain": domain,
             "error": "no RDAP data. either not registered or the TLD has no public "
                      "RDAP server (.ro, .de and a few other ccTLDs), use their web whois",
         }
-    r.raise_for_status()
-    return parse_rdap_domain(r.json())
+    return parse_rdap_domain(data)
 
 
 async def rdap_ip(client, ip):
-    r = await client.get(f"https://rdap.org/ip/{ip}")
-    r.raise_for_status()
-    return parse_rdap_ip(r.json())
+    _, data = await fetch_json(client, f"https://rdap.org/ip/{ip}")
+    return parse_rdap_ip(data)
 
 
 # --- DNS ---
@@ -182,6 +199,17 @@ async def dns_records(domain, types=None, nameserver=None):
     return {"domain": domain, "records": records}
 
 
+async def txt_records(name):
+    """TXT strings for a name, [] if there are none or the name doesn't exist."""
+    resolver = dns.asyncresolver.Resolver()
+    resolver.lifetime = 5.0
+    try:
+        answer = await resolver.resolve(name, "TXT")
+    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.NoNameservers):
+        return []
+    return [_rdata_text("TXT", r) for r in answer]
+
+
 async def reverse_dns(ip):
     resolver = dns.asyncresolver.Resolver()
     resolver.lifetime = 5.0
@@ -206,14 +234,14 @@ def parse_crtsh(rows: list, domain: str) -> list[str]:
 
 async def crtsh_subdomains(client, domain):
     # crt.sh can take a while on big domains
-    r = await get_flaky(
+    _, rows = await fetch_json(
         client,
         "https://crt.sh/",
         params={"q": f"%.{domain}", "output": "json"},
+        retries=2,
         timeout=60.0,
     )
-    r.raise_for_status()
-    rows = r.json() if r.content else []
+    rows = rows or []
     return {"domain": domain, "certs_seen": len(rows), "subdomains": parse_crtsh(rows, domain)}
 
 
@@ -246,9 +274,10 @@ async def wayback_snapshots(client, url, limit=20, newest_first=True, year_from=
         params["to"] = str(year_to)
 
     # the cdx api regularly takes 20-30s, give it room
-    r = await get_flaky(client, "https://web.archive.org/cdx/search/cdx", params=params, timeout=60.0)
-    r.raise_for_status()
-    snaps = parse_cdx(r.json() if r.content else [])
+    _, rows = await fetch_json(
+        client, "https://web.archive.org/cdx/search/cdx", params=params, retries=2, timeout=60.0
+    )
+    snaps = parse_cdx(rows or [])
     if newest_first:
         snaps.reverse()
     return {"url": url, "count": len(snaps), "snapshots": snaps}
@@ -275,8 +304,7 @@ async def http_headers(client, url):
 # --- shodan internetdb (free, no key) ---
 
 async def internetdb(client, ip):
-    r = await client.get(f"https://internetdb.shodan.io/{ip}")
-    if r.status_code == 404:
+    status, data = await fetch_json(client, f"https://internetdb.shodan.io/{ip}", ok=(200, 404))
+    if status == 404:
         return {"ip": ip, "ports": [], "note": "shodan has nothing on this ip"}
-    r.raise_for_status()
-    return r.json()
+    return data
