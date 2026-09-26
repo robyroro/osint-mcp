@@ -4,7 +4,7 @@ import httpx
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
-from . import sources
+from . import mailsec, sources
 
 # httpx logs every request at INFO, way too chatty
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -102,6 +102,14 @@ async def shodan_internetdb(ip: str) -> dict:
     """Open ports, hostnames, CPEs, tags and known CVEs for an IP from Shodan's
     free InternetDB (no API key, data can be a few days old)."""
     return await _run(sources.internetdb, _ip(ip))
+
+
+@mcp.tool()
+async def email_security(domain: str, dkim_selectors: list[str] | None = None) -> dict:
+    """Grade (A-F) how well a domain is protected against being spoofed in email:
+    SPF, DMARC, MTA-STS, TLS-RPT and DKIM. DKIM selectors can't be listed, so a
+    set of common ones is tried unless you pass your own."""
+    return await _run(mailsec.check, _domain(domain), dkim_selectors)
 
 
 def main():
