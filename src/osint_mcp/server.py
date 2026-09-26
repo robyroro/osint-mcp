@@ -13,8 +13,9 @@ mcp = MCPServer(
     "osint",
     instructions=(
         "Passive recon tools for domains and IPs: RDAP/whois, DNS, certificate "
-        "transparency, Wayback Machine, HTTP headers and Shodan InternetDB. "
-        "Nothing here scans or brute forces anything."
+        "transparency, email security (SPF/DMARC/MTA-STS), TLS certificates, ASN/BGP, "
+        "Wayback Machine, HTTP headers and Shodan InternetDB. Start with recon_domain "
+        "for an overview. Nothing here scans or brute forces anything."
     ),
 )
 

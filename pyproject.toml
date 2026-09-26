@@ -1,7 +1,7 @@
 [project]
 name = "osint-mcp-server"
-version = "0.1.0"
-description = "MCP server with passive OSINT lookups (RDAP, DNS, crt.sh, Wayback, Shodan InternetDB)"
+version = "0.2.0"
+description = "MCP server for passive OSINT recon: whois, DNS, CT logs, email security, TLS, ASN, Wayback, Shodan InternetDB"
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "robyroro" }]

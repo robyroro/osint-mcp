@@ -11,6 +11,7 @@ I got tired of jumping between whois, crt.sh, the Wayback Machine and Shodan tab
 
 | tool | what it does | source |
 |---|---|---|
+| `recon_domain` | all of the below at once + a list of highlights worth a look | everything |
 | `domain_whois` | registrar, created/expires, nameservers, abuse contact | RDAP (rdap.org) |
 | `ip_whois` | network owner, CIDR, country, abuse contact, PTR | RDAP + reverse DNS |
 | `dns_lookup` | A, AAAA, CNAME, MX, NS, TXT, SOA, CAA (or pick your own) | your resolver or a custom one |
@@ -18,8 +19,11 @@ I got tired of jumping between whois, crt.sh, the Wayback Machine and Shodan tab
 | `wayback` | archived snapshots of a URL, supports `example.com/*` | Wayback CDX API |
 | `http_headers` | status, redirect chain, headers, missing security headers | direct request |
 | `shodan_internetdb` | open ports, hostnames, CPEs, known CVEs | Shodan InternetDB (free) |
+| `email_security` | SPF, DMARC, MTA-STS, TLS-RPT, DKIM, graded A-F | DNS |
+| `tls_certificate` | issuer, expiry, SANs, TLS version, why a cert is invalid | direct connection |
+| `asn_lookup` | which AS announces an IP, who owns it, all its prefixes | RIPEstat |
 
-Everything except `http_headers` is passive, the target never sees your traffic. `http_headers` is just a normal GET request, same as opening the page in a browser.
+Everything except `http_headers` and `tls_certificate` is passive, the target never sees your traffic. Those two just open a normal connection, same as visiting the site in a browser.
 
 ## Install
 
@@ -58,15 +62,29 @@ Cursor, Windsurf etc. take the same JSON as Claude Desktop.
 
 ## Example prompts
 
-- "what can you find about example.com? registrar, dns, subdomains, anything interesting"
+- "run recon on example.com and tell me what stands out"
+- "can someone spoof email from our domain? what should we fix first?"
+- "which of these 20 domains have certificates expiring this month?"
+- "what ip ranges does AS13335 announce?"
 - "check the security headers on these 5 sites and tell me which are worst"
 - "which of the subdomains of example.com resolve to something with open ports?"
 - "what did example.com/about look like in 2015?"
+
+## Caching
+
+API responses (RDAP, crt.sh, Wayback, RIPEstat, InternetDB) are cached in sqlite for 6 hours at `~/.cache/osint-mcp/cache.sqlite3`, mostly so crt.sh doesn't get hammered. DNS, TLS and HTTP checks are always live.
+
+```
+OSINT_MCP_CACHE=off           # disable
+OSINT_MCP_CACHE_TTL=3600      # seconds
+OSINT_MCP_CACHE_PATH=/tmp/x.db
+```
 
 ## Notes
 
 - crt.sh and the Wayback CDX API are slow and return 502/503 pretty often. The server retries a couple of times but sometimes you just have to try again later.
 - InternetDB isn't real-time and only has IPs Shodan has actually scanned.
+- DKIM selectors can't be listed, `email_security` tries the common ones. Pass `dkim_selectors` if you know yours.
 - `.ro`, `.de` and some other ccTLDs don't have public RDAP, so `domain_whois` can't do much for them.
 
 ## Development
