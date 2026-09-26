@@ -40,6 +40,21 @@ async def get_flaky(client, url, retries=2, **kwargs):
         await asyncio.sleep(2 * (attempt + 1))
 
 
+def describe_error(exc):
+    """Short human readable version of whatever went wrong talking to an API."""
+    try:
+        host = exc.request.url.host
+    except (AttributeError, RuntimeError):
+        host = "the server"
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"{host} returned {exc.response.status_code}"
+    if isinstance(exc, httpx.TimeoutException):
+        return f"timed out talking to {host}, try again"
+    if isinstance(exc, httpx.RequestError):
+        return f"request to {host} failed: {exc.__class__.__name__}"
+    return f"{exc.__class__.__name__}: {exc}"
+
+
 async def fetch_json(client, url, params=None, retries=0, ok=(200,), **kwargs):
     """GET + json with the sqlite cache in front. Returns (status, data).
     Statuses outside `ok` raise, same as raise_for_status()."""

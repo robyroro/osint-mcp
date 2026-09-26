@@ -4,7 +4,7 @@ import httpx
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
-from . import mailsec, sources, tlscert
+from . import mailsec, recon, sources, tlscert
 
 # httpx logs every request at INFO, way too chatty
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -37,12 +37,19 @@ async def _run(coro_fn, *args, **kwargs):
     async with sources.make_client() as client:
         try:
             return await coro_fn(client, *args, **kwargs)
-        except httpx.HTTPStatusError as e:
-            raise ToolError(f"{e.request.url.host} returned {e.response.status_code}")
-        except httpx.TimeoutException as e:
-            raise ToolError(f"timed out talking to {e.request.url.host}, try again")
-        except httpx.RequestError as e:
-            raise ToolError(f"request failed: {e}")
+        except httpx.HTTPError as e:
+            raise ToolError(sources.describe_error(e))
+
+
+@mcp.tool()
+async def recon_domain(domain: str, include_subdomains: bool = True) -> dict:
+    """Passive overview of a domain in one call: whois, DNS, email security grade,
+    TLS certificate, HTTP security headers, subdomains from CT logs, and ASN /
+    reverse DNS / Shodan InternetDB for its first few IPs. Ends with a
+    'highlights' list of things worth a look. Takes 10-60s, mostly waiting on
+    crt.sh, pass include_subdomains=false for a faster run."""
+    async with sources.make_client() as client:
+        return await recon.recon(client, _domain(domain), include_subdomains)
 
 
 @mcp.tool()
