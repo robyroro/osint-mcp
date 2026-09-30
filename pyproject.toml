@@ -1,10 +1,10 @@
 [project]
 name = "osint-mcp-server"
-version = "0.2.0"
+version = "0.2.1"
 description = "MCP server for passive OSINT recon: whois, DNS, CT logs, email security, TLS, ASN, Wayback, Shodan InternetDB"
 readme = "README.md"
 license = "MIT"
-authors = [{ name = "robyroro" }]
+authors = [{ name = "Robert Vind-Gardoș" }]
 requires-python = ">=3.10"
 keywords = ["mcp", "osint", "recon", "whois", "dns", "claude"]
 classifiers = [
@@ -20,6 +20,7 @@ dependencies = [
 
 [project.urls]
 Repository = "https://github.com/robyroro/osint-mcp"
+Author = "https://stratagency.ro/en/robert-vind-gardos"
 
 [project.scripts]
 osint-mcp = "osint_mcp.server:main"

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- package metadata: author name and link, no code changes
+
 ## 0.2.0
 
 - `recon_domain`: runs everything at once and ends with a list of highlights. one failing source doesn't break the report anymore, it just shows the error in that section

@@ -110,6 +110,6 @@ This only pulls public data, but still: use it on your own stuff, bug bounty tar
 
 ## License
 
-MIT
+MIT © [Robert Vind-Gardoș](https://stratagency.ro/en/robert-vind-gardos) ([@robyroro](https://github.com/robyroro))
 
 <!-- mcp-name: io.github.robyroro/osint-mcp -->
