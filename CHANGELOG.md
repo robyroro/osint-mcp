@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.2
+
+- every tool parameter has a description now, and each tool says when to use it vs the others, how slow it is and what's cached
+- tools are marked read-only / non-destructive (MCP tool annotations) and have titles
+- `tls_certificate` rejects ports outside 1-65535 up front
+- `glama.json` so the Glama listing can be claimed
+
 ## 0.2.1
 
 - package metadata: author name and link, no code changes

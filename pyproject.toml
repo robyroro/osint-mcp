@@ -1,6 +1,6 @@
 [project]
 name = "osint-mcp-server"
-version = "0.2.1"
+version = "0.2.2"
 description = "MCP server for passive OSINT recon: whois, DNS, CT logs, email security, TLS, ASN, Wayback, Shodan InternetDB"
 readme = "README.md"
 license = "MIT"
