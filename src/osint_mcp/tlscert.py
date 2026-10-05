@@ -3,6 +3,8 @@ import ssl
 import time
 from datetime import datetime, timezone
 
+from . import evidence, network
+
 OLD_PROTOCOLS = {"SSLv3", "TLSv1", "TLSv1.1"}
 
 
@@ -48,15 +50,19 @@ async def fetch_certificate(host, port=443, timeout=10.0):
     base = {"host": host, "port": port}
     ctx = ssl.create_default_context()
     try:
+        addresses = await network.resolve_public(host, port)
         _, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, port, ssl=ctx, server_hostname=host), timeout
+            asyncio.open_connection(addresses[0], port, ssl=ctx, server_hostname=host), timeout
         )
+        evidence.record('TLS connection', f'tls://{host}:{port}', fetched_at=evidence.now())
     except ssl.SSLCertVerificationError as e:
         return {**base, "valid": False, "error": e.verify_message or str(e)}
     except ssl.SSLError as e:
         return {**base, "valid": False, "error": f"tls handshake failed: {e.reason or e}"}
     except (OSError, asyncio.TimeoutError) as e:
         return {**base, "error": f"couldn't connect: {e.__class__.__name__}"}
+    except ValueError as e:
+        return {**base, 'error': str(e)}
 
     try:
         obj = writer.get_extra_info("ssl_object")

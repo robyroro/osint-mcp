@@ -1,6 +1,6 @@
 import asyncio
 import ipaddress
-from urllib.parse import urlparse
+from datetime import datetime, timezone
 
 import dns.asyncresolver
 import dns.exception
@@ -8,9 +8,10 @@ import dns.resolver
 import dns.reversename
 import httpx
 
+from . import evidence, network
 from .cache import get_cache
 
-USER_AGENT = "osint-mcp/0.2 (+https://github.com/robyroro/osint-mcp)"
+USER_AGENT = "osint-mcp/0.3 (+https://github.com/robyroro/osint-mcp)"
 
 SECURITY_HEADERS = [
     "strict-transport-security",
@@ -27,6 +28,9 @@ def make_client(timeout=15.0):
         headers={"User-Agent": USER_AGENT},
         timeout=timeout,
         follow_redirects=True,
+        max_redirects=5,
+        transport=network.PublicTransport(),
+        trust_env=False,
     )
 
 
@@ -34,7 +38,7 @@ async def get_flaky(client, url, retries=2, **kwargs):
     # crt.sh and archive.org both hand out 502/503s under load,
     # a retry or two usually gets through
     for attempt in range(retries + 1):
-        r = await client.get(url, **kwargs)
+        r = await network.read_limited(client, url, **kwargs)
         if r.status_code not in (502, 503, 504) or attempt == retries:
             return r
         await asyncio.sleep(2 * (attempt + 1))
@@ -60,11 +64,20 @@ async def fetch_json(client, url, params=None, retries=0, ok=(200,), **kwargs):
     Statuses outside `ok` raise, same as raise_for_status()."""
     cache = get_cache()
     key = cache.key(url, params)
-    hit = cache.get(key)
+    hit = cache.get_entry(key)
     if hit is not None:
-        return hit
+        def iso(timestamp):
+            return datetime.fromtimestamp(timestamp, timezone.utc).isoformat(timespec='seconds') if timestamp is not None else None
+        evidence.record('HTTP API', key, status=str(hit[0]), cached=True,
+                        fetched_at=iso(hit[2]), expires_at=iso(hit[3]))
+        return hit[:2]
 
-    r = await get_flaky(client, url, retries=retries, params=params, **kwargs)
+    try:
+        r = await get_flaky(client, url, retries=retries, params=params, **kwargs)
+    except (httpx.HTTPError, ValueError) as error:
+        evidence.record('HTTP API', key, status='error', error=describe_error(error))
+        raise
+    evidence.record('HTTP API', str(r.url), status=str(r.status_code), fetched_at=evidence.now())
     if r.status_code not in ok:
         r.raise_for_status()
     data = r.json() if r.content else None
@@ -74,14 +87,7 @@ async def fetch_json(client, url, params=None, retries=0, ok=(200,), **kwargs):
 
 def clean_domain(value: str) -> str:
     """Accepts 'example.com', 'https://Example.com/x', 'www.example.com.' etc."""
-    value = value.strip()
-    if "://" in value:
-        value = urlparse(value).hostname or ""
-    value = value.split("/")[0].split(":")[0]
-    value = value.strip(".").lower()
-    if not value or "." not in value:
-        raise ValueError(f"doesn't look like a domain: {value!r}")
-    return value
+    return network.hostname(network.normalize_url(value.strip()).host)
 
 
 def clean_ip(value: str) -> str:
@@ -196,21 +202,31 @@ async def dns_records(domain, types=None, nameserver=None):
     resolver = dns.asyncresolver.Resolver()
     resolver.lifetime = 5.0
     if nameserver:
-        resolver.nameservers = [nameserver]
+        resolver.nameservers = [network.public_ip(nameserver)]
 
     records = {}
-    for rdtype in types or DEFAULT_RECORD_TYPES:
+    selected = types or DEFAULT_RECORD_TYPES
+    if len(selected) > 16:
+        raise ValueError('at most 16 DNS record types can be requested')
+    for rdtype in selected:
         rdtype = rdtype.upper()
         try:
             answer = await resolver.resolve(domain, rdtype)
         except dns.resolver.NXDOMAIN:
+            evidence.record('DNS', f'dns://{domain}', status='nxdomain', fetched_at=evidence.now())
             return {"domain": domain, "error": "NXDOMAIN (domain doesn't exist)"}
-        except (dns.resolver.NoAnswer, dns.resolver.NoNameservers):
+        except dns.resolver.NoAnswer:
+            continue
+        except dns.resolver.NoNameservers:
+            records[rdtype] = ['<unavailable>']
             continue
         except dns.exception.Timeout:
             records[rdtype] = ["<timeout>"]
             continue
         records[rdtype] = sorted(_rdata_text(rdtype, r) for r in answer)
+    partial = any(any(value.startswith('<') for value in values) for values in records.values())
+    evidence.record('DNS', f'dns://{domain}', status='partial' if partial else 'ok', fetched_at=evidence.now(),
+                    resolver=nameserver or 'system', record_types=selected)
     return {"domain": domain, "records": records}
 
 
@@ -220,8 +236,13 @@ async def txt_records(name):
     resolver.lifetime = 5.0
     try:
         answer = await resolver.resolve(name, "TXT")
-    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.NoNameservers):
+    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+        evidence.record('DNS TXT', f'dns://{name}', status='no_records', fetched_at=evidence.now())
         return []
+    except dns.exception.DNSException as error:
+        evidence.record('DNS TXT', f'dns://{name}', status='error', error=error.__class__.__name__)
+        raise ValueError(f'could not read TXT records for {name}: {error.__class__.__name__}') from error
+    evidence.record('DNS TXT', f'dns://{name}', fetched_at=evidence.now(), resolver='system')
     return [_rdata_text("TXT", r) for r in answer]
 
 
@@ -231,7 +252,9 @@ async def reverse_dns(ip):
     try:
         answer = await resolver.resolve(dns.reversename.from_address(ip), "PTR")
     except dns.exception.DNSException:
+        evidence.record('DNS PTR', f'dns://{dns.reversename.from_address(ip)}', status='no_response')
         return []
+    evidence.record('DNS PTR', f'dns://{dns.reversename.from_address(ip)}', fetched_at=evidence.now())
     return sorted(r.to_text().rstrip(".") for r in answer)
 
 
@@ -301,11 +324,11 @@ async def wayback_snapshots(client, url, limit=20, newest_first=True, year_from=
 # --- http headers ---
 
 async def http_headers(client, url):
-    if "://" not in url:
-        url = "https://" + url
-    r = await client.get(url)
-    headers = {k.lower(): v for k, v in r.headers.items()}
-    return {
+    url = str(network.normalize_url(url))
+    async with client.stream('GET', url) as r:
+        headers = {k.lower(): v for k, v in r.headers.items()}
+        evidence.record('Website HTTP', str(r.url), status=str(r.status_code), fetched_at=evidence.now())
+        return {
         "url": url,
         "final_url": str(r.url),
         "status": r.status_code,
@@ -373,7 +396,8 @@ async def asn_info(client, query, include_prefixes=True, max_prefixes=100):
     if include_prefixes:
         announced = await _ripestat(client, "announced-prefixes", f"AS{asn}")
         prefixes = [p["prefix"] for p in announced.get("prefixes", [])]
-        by_net = lambda p: ipaddress.ip_network(p, strict=False)
+        def by_net(prefix):
+            return ipaddress.ip_network(prefix, strict=False)
         v4 = sorted((p for p in prefixes if ":" not in p), key=by_net)
         v6 = sorted((p for p in prefixes if ":" in p), key=by_net)
         out["prefix_count"] = {"ipv4": len(v4), "ipv6": len(v6)}

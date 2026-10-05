@@ -4,7 +4,7 @@ import asyncio
 import ipaddress
 from datetime import datetime, timezone
 
-from . import mailsec, sources, tlscert
+from . import evidence, mailsec, sources, tlscert
 
 MAX_IPS = 3
 MAX_SUBDOMAINS = 100
@@ -42,7 +42,8 @@ def _is_ip(value):
 
 async def _dns_and_ips(client, domain):
     dns = await sources.dns_records(domain)
-    ips = [a for a in dns.get("records", {}).get("A", []) if _is_ip(a)][:MAX_IPS]
+    records = dns.get('records', {})
+    ips = list(dict.fromkeys(a for a in records.get('A', []) + records.get('AAAA', []) if _is_ip(a)))[:MAX_IPS]
     details = await asyncio.gather(*(_ip_details(client, ip) for ip in ips))
     return {"dns": dns, "ips": dict(zip(ips, details))}
 
@@ -100,14 +101,14 @@ def highlights(report):
     return out
 
 
-async def recon(client, domain, include_subdomains=True):
+async def recon(client, domain, include_subdomains=True, include_active=True):
     checks = {
         "whois": sources.rdap_domain(client, domain),
         "dns_ips": _dns_and_ips(client, domain),
-        "email": mailsec.check(client, domain),
-        "tls": tlscert.fetch_certificate(domain),
-        "http": sources.http_headers(client, domain),
+        "email": mailsec.check(client, domain) if include_active else mailsec.check(client, domain, fetch_policy=False),
     }
+    if include_active:
+        checks.update(tls=tlscert.fetch_certificate(domain), http=sources.http_headers(client, domain))
     if include_subdomains:
         checks["subdomains"] = sources.crtsh_subdomains(client, domain)
 
@@ -117,9 +118,25 @@ async def recon(client, domain, include_subdomains=True):
     report = {"domain": domain, **results}
     report["dns"] = dns_ips.get("dns", dns_ips)
     report["ips"] = dns_ips.get("ips", {})
+    coverage = {name: ('error' if value.get('error') else 'ok') for name, value in report.items() if isinstance(value, dict) and name != 'ips'}
+    if any(any(value.startswith('<') for value in values) for values in report['dns'].get('records', {}).values()):
+        coverage['dns'] = 'partial'
+    for name in ('tls', 'http'):
+        if not include_active:
+            coverage[name] = 'skipped'
+    coverage['subdomains'] = coverage.get('subdomains', 'skipped')
+    if report.get('email', {}).get('mta_sts', {}).get('policy_error'):
+        coverage['email'] = 'partial'
+    report['coverage'] = coverage
+    report['checked_at'] = evidence.now()
+    report['mode'] = 'with_direct_checks' if include_active else 'no_direct_web_connections'
+    partial_ips = [ip for ip, details in report['ips'].items() if any(value.get('error') for value in details.values() if isinstance(value, dict))]
+    if partial_ips:
+        coverage['ip_details'] = 'partial'
+        report['incomplete_ips'] = partial_ips
 
     # the full header dump and subdomain list make the report huge, trim them
-    if "headers" in report["http"]:
+    if "headers" in report.get("http", {}):
         report["http"] = {k: v for k, v in report["http"].items() if k != "headers"}
     subs = report.get("subdomains")
     if subs and "subdomains" in subs:

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0
+
+- `recon_batch` checks up to ten domains, with three running at once, a per-domain deadline and incomplete checks called out.
+- `compare_domains` finds shared IPs, nameservers, mail servers and registrars without assuming the sites have the same owner.
+- `investigate_site` reads a page and up to three contact/legal pages, collects public domain records and archive captures, and returns signals with their evidence and missing checks.
+- `certificate_history` returns deduplicated CT entries with issuers, dates, names and certificate links.
+- Recon can skip direct web connections and now considers IPv6 as well as IPv4. DNS timeouts are marked as partial results.
+- MCP responses carry source URLs, collection times and cache freshness. Old cache databases are migrated without losing their entries.
+- HTTP and TLS connections are restricted to public addresses. DNS is pinned before connecting, redirects are checked and response bodies are bounded.
+- The site parser uses an offline public suffix list for brand-domain comparisons. External text is explicitly treated as untrusted data.
+- Package, registry and runtime versions now agree. Tests run on Linux and Windows and include a stdio client session.
+
 ## 0.2.2
 
 - every tool parameter has a description now, and each tool says when to use it vs the others, how slow it is and what's cached

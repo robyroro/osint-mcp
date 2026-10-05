@@ -5,7 +5,7 @@ import secrets
 
 import httpx
 
-from . import sources
+from . import evidence, network, sources
 
 # selectors used by the big providers, we can't list them so we just try these
 COMMON_DKIM_SELECTORS = [
@@ -148,10 +148,11 @@ async def _mta_sts(client, domain, txts):
         return {"present": False}
     out = {"present": True, "record": record}
     try:
-        r = await client.get(f"https://mta-sts.{domain}/.well-known/mta-sts.txt", timeout=10.0)
+        r = await network.read_limited(client, f"https://mta-sts.{domain}/.well-known/mta-sts.txt", max_bytes=65536, timeout=10.0)
+        evidence.record('MTA-STS policy', str(r.url), status=str(r.status_code), fetched_at=evidence.now())
         r.raise_for_status()
         out.update(parse_mta_sts_policy(r.text))
-    except httpx.HTTPError as e:
+    except (httpx.HTTPError, ValueError) as e:
         out["policy_error"] = f"couldn't fetch the policy file: {e.__class__.__name__}"
     return out
 
@@ -193,8 +194,10 @@ async def _dkim(domain, selectors):
     return out
 
 
-async def check(client, domain, dkim_selectors=None):
+async def check(client, domain, dkim_selectors=None, fetch_policy=True):
     selectors = dkim_selectors or COMMON_DKIM_SELECTORS
+    if len(selectors) > 20 or any(not s or len(s) > 63 or not all(c.isalnum() or c in '-_' for c in s) for s in selectors):
+        raise ValueError('use at most 20 DKIM selectors, each containing letters, digits, - or _')
     root_txt, dmarc_txt, sts_txt, tlsrpt_txt, mx, dkim = await asyncio.gather(
         sources.txt_records(domain),
         sources.txt_records(f"_dmarc.{domain}"),
@@ -205,9 +208,13 @@ async def check(client, domain, dkim_selectors=None):
     )
     spf = parse_spf(root_txt)
     dmarc = parse_dmarc(dmarc_txt)
-    mta_sts = await _mta_sts(client, domain, sts_txt)
+    mta_sts = await _mta_sts(client, domain, sts_txt) if fetch_policy else {
+        'present': any(t.lower().startswith('v=stsv1') for t in sts_txt),
+        'policy_skipped': True,
+    }
     mx_hosts = mx.get("records", {}).get("MX", [])
-    letter, issues = grade(spf, dmarc, mta_sts, has_mx=bool(mx_hosts))
+    letter, issues = grade(spf, dmarc, mta_sts if fetch_policy else None,
+                          has_mx=any(host.split()[-1] not in ('.', '<timeout>', '<unavailable>') for host in mx_hosts))
 
     return {
         "domain": domain,

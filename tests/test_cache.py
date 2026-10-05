@@ -1,4 +1,6 @@
 import asyncio
+import sqlite3
+import time
 
 import httpx
 
@@ -59,3 +61,15 @@ def test_404s_are_cached_too():
 
     assert "error" in asyncio.run(go())
     assert len(calls) == 1
+
+
+def test_old_database_keeps_entries_and_marks_collection_time_unknown(tmp_path):
+    path = tmp_path / 'old.sqlite3'
+    with sqlite3.connect(path) as db:
+        db.execute('create table responses (key text primary key, status integer, body text, expires real)')
+        db.execute('insert into responses values (?, ?, ?, ?)', ('old', 200, '{"a":1}', time.time() + 60))
+    migrated = cache.Cache(path)
+    assert migrated.get('old') == (200, {'a': 1})
+    assert migrated.get_entry('old')[2] is None
+    migrated.set('new', 200, {'b': 2})
+    assert migrated.get_entry('new')[2] is not None

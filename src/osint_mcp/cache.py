@@ -28,6 +28,10 @@ class Cache:
             "create table if not exists responses ("
             " key text primary key, status integer, body text, expires real)"
         )
+        columns = {row[1] for row in self.db.execute('pragma table_info(responses)')}
+        if 'fetched_at' not in columns:
+            self.db.execute('alter table responses add column fetched_at real')
+            self.db.commit()
 
     @staticmethod
     def key(url, params=None):
@@ -36,22 +40,26 @@ class Cache:
         return url
 
     def get(self, key):
+        entry = self.get_entry(key)
+        return entry[:2] if entry is not None else None
+
+    def get_entry(self, key):
         if self.db is None:
             return None
         row = self.db.execute(
-            "select status, body, expires from responses where key = ?", (key,)
+            "select status, body, expires, fetched_at from responses where key = ?", (key,)
         ).fetchone()
         if row is None or row[2] < time.time():
             return None
-        return row[0], json.loads(row[1])
+        return row[0], json.loads(row[1]), row[3], row[2]
 
     def set(self, key, status, data, ttl=None):
         if self.db is None:
             return
         expires = time.time() + (ttl if ttl is not None else self.ttl)
         self.db.execute(
-            "insert or replace into responses values (?, ?, ?, ?)",
-            (key, status, json.dumps(data), expires),
+            "insert or replace into responses (key, status, body, expires, fetched_at) values (?, ?, ?, ?, ?)",
+            (key, status, json.dumps(data), expires, time.time()),
         )
         self.db.commit()
 

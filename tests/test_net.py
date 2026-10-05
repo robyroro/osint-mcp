@@ -41,7 +41,7 @@ def test_cert_warnings():
 def test_unreachable_host_doesnt_raise():
     # port 9 on localhost is ~never open
     result = asyncio.run(tlscert.fetch_certificate("127.0.0.1", 9, timeout=3))
-    assert "couldn't connect" in result["error"]
+    assert "private, local and reserved" in result["error"]
 
 
 @pytest.mark.parametrize(

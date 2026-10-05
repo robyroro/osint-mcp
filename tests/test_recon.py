@@ -91,3 +91,20 @@ def test_skip_subdomains(fake_sources):
 def test_expiring_domain_is_highlighted():
     h = recon.highlights({"whois": {"expires": "2000-01-01T00:00:00Z"}})
     assert h[0].startswith("domain registration expires in -")
+
+
+def test_no_direct_web_mode_skips_tls_http_and_policy(fake_sources):
+    async def email(client, domain, dkim_selectors=None, fetch_policy=True):
+        assert not fetch_policy
+        return {'grade': 'C', 'issues': []}
+
+    async def forbidden(*args, **kwargs):
+        raise AssertionError('direct connection was attempted')
+
+    fake_sources.setattr(recon.mailsec, 'check', email)
+    fake_sources.setattr(recon.sources, 'http_headers', forbidden)
+    fake_sources.setattr(recon.tlscert, 'fetch_certificate', forbidden)
+    report = asyncio.run(recon.recon(None, 'example.com', False, False))
+    assert report['coverage']['http'] == report['coverage']['tls'] == 'skipped'
+    assert 'http' not in report and 'tls' not in report
+    assert report['coverage']['dns'] == 'partial'

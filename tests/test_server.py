@@ -6,7 +6,7 @@ TOOLS = asyncio.run(mcp.list_tools())
 
 
 def test_all_tools_registered():
-    assert len(TOOLS) == 11
+    assert len(TOOLS) == 15
 
 
 def test_every_parameter_has_a_description():
